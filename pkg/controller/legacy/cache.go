@@ -41,6 +41,7 @@ import (
 	typedv1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	gatewayv1alpha1 "sigs.k8s.io/gateway-api/apis/v1alpha1"
 	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
@@ -820,6 +821,10 @@ func (c *k8scache) IsValidConfigMap(cm *api.ConfigMap) bool {
 	key := fmt.Sprintf("%s/%s", cm.Namespace, cm.Name)
 	return key == c.globalConfigMapKey || key == c.tcpConfigMapKey
 }
+
+// A noop func just to implement the Cache intf, this is not
+// used by this version of the controller.
+func (c *k8scache) UpdateStatus(client.Object) {}
 
 // implements ListerEvents
 func (c *k8scache) Notify(old, cur interface{}) {
