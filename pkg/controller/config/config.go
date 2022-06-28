@@ -279,13 +279,17 @@ usually serving long lived connections like TCP services or websockets.`)
 		`Defines if the nodes IP address to be returned in the ingress status should be
 the internal instead of the external IP address`)
 
-	showVersion := flag.Bool("version", false,
-		`Shows release information about the Ingress controller`)
+	logDev := flag.Bool("log-dev", false,
+		`Configures development style logging. Development mode configures the log
+output as console, non development mode configures the output as json.`)
 
-	_ = flag.Int("v", 2,
-		`DEPRECATED: this flag used to add a few more logging info, which is already
-added in the default configuration. Use --log-* command-line options for further
-configuration options`)
+	logCaller := flag.Bool("log-caller", false,
+		`Defines if the log output should add a reference of the caller with file name
+and line number.`)
+
+	logLevel := flag.Int("v", 2,
+		`Number for the log level verbosity. 0: only errors; 1: add info; 2: add low
+verbosity debug.`)
 
 	logEncodeTime := flag.String("log-encode-time", "rfc3339nano",
 		`Configures the encode time used in the logs. Options are: rfc3339nano, rfc3339,
@@ -302,6 +306,9 @@ Actually node listing isn't needed and it is always disabled`)
 	ignoreIngressWithoutClass := flag.Bool("ignore-ingress-without-class", false,
 		`DEPRECATED: Use --watch-ingress-without-class command-line option instead to
 define if ingress without class should be tracked.`)
+
+	showVersion := flag.Bool("version", false,
+		`Shows release information about the Ingress controller`)
 
 	flag.Parse()
 
@@ -321,7 +328,8 @@ define if ingress without class should be tracked.`)
 
 	// Logger must be configured before the first `return`
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&ctrlzap.Options{
-		Level:           zap.DebugLevel,
+		Development:     *logDev,
+		Level:           zapcore.Level(1 - *logLevel),
 		StacktraceLevel: zapcore.FatalLevel,
 		EncoderConfigOptions: []ctrlzap.EncoderConfigOption{
 			func(ec *zapcore.EncoderConfig) {
@@ -329,7 +337,7 @@ define if ingress without class should be tracked.`)
 			},
 		},
 		ZapOpts: []zap.Option{
-			zap.WithCaller(true),
+			zap.WithCaller(*logCaller),
 			zap.AddCallerSkip(-1),
 		},
 	})))
