@@ -53,6 +53,7 @@ type Services struct {
 	reloadCount  int
 	reloadQueue  utils.Queue
 	svcleader    *svcLeader
+	svchealthz   *svcHealthz
 	svcstatus    *svcStatusUpdater
 	updateCount  int
 }
@@ -96,6 +97,7 @@ func (s *Services) setup(ctx context.Context) error {
 	tracker := tracker.NewTracker()
 	metrics := createMetrics(cfg.BucketsResponseTime)
 	svcleader := initSvcLeader(ctx)
+	svchealthz := initSvcHealthz(ctx, cfg, metrics, s.acmeExternalCallCheck)
 	svcstatus := initSvcStatusUpdater(ctx, s.Client)
 	cache := createCacheFacade(ctx, s.Client, cfg, tracker, sslCerts, dynConfig, svcstatus.Update)
 	var acmeClient *svcAcmeClient
@@ -167,6 +169,7 @@ func (s *Services) setup(ctx context.Context) error {
 	s.modelMutex = sync.Mutex{}
 	s.reloadQueue = reloadQueue
 	s.svcleader = svcleader
+	s.svchealthz = svchealthz
 	s.svcstatus = svcstatus
 	return nil
 }
@@ -202,6 +205,11 @@ func (s *Services) withManager(mgr ctrl.Manager) error {
 	}
 	if s.acmeServer != nil {
 		if err := mgr.Add(ctrlutils.DistributedService(s.acmeServer)); err != nil {
+			return err
+		}
+	}
+	if s.svchealthz != nil {
+		if err := mgr.Add(ctrlutils.DistributedService(s.svchealthz)); err != nil {
 			return err
 		}
 	}

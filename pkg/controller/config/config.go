@@ -194,19 +194,27 @@ the time to receive all/most of the changes of a batch update.`)
 	watchNamespace := flag.String("watch-namespace", v1.NamespaceAll,
 		`Namespace to watch for Ingress. Default is to watch all namespaces`)
 
-	metricsPort := flag.Int("metrics-port", 9009,
-		`The address the metric endpoint binds to.`)
-
-	healthzPort := flag.Int("healthz-port", 10254,
-		`The address the probe endpoint binds to.`)
-
 	statsCollectProcPeriod := flag.Duration("stats-collect-processing-period", 500*time.Millisecond,
 		`Defines the interval between two consecutive readings of haproxy's Idle_pct.
 haproxy updates Idle_pct every 500ms, which makes that the best configuration
 value. Change to 0 (zero) to disable this metric.`)
 
+	healthzAddr := flag.String("healthz-addr", ":10254",
+		`The address the healthz service should bind to. Configure with an empty string
+to disable it`)
+
+	healthzURL := flag.String("health-check-path", "/healthz",
+		`Defines the URL to be used as health check.`)
+
+	readyzURL := flag.String("ready-check-path", "/readyz",
+		`Defines the URL to be used as readyness check.`)
+
 	profiling := flag.Bool("profiling", true,
-		`Enable profiling via web interface host:port/debug/pprof/`)
+		`Enable profiling via web interface host:healthzport/debug/pprof/`)
+
+	stopHandler := flag.Bool("stop-handler", false,
+		`Allows to stop the controller via a POST request to host:healthzport/stop
+endpoint`)
 
 	defSSLCertificate := flag.String("default-ssl-certificate", "",
 		`Name of the secret that contains a SSL certificate to be used as
@@ -215,9 +223,6 @@ default for a HTTPS catch-all server`)
 	verifyHostname := flag.Bool("verify-hostname", true,
 		`Defines if the controller should verify if the provided certificate is valid,
 ie, it's SAN extension has the hostname.`)
-
-	defHealthzURL := flag.String("health-check-path", "/healthz",
-		`Defines the URL to be used as health check inside in the default server.`)
 
 	updateStatus := flag.Bool("update-status", true,
 		`Indicates if the controller should update the 'status' attribute of all the
@@ -299,6 +304,9 @@ iso8601, millis, nanos.`)
 		`DEPRECATED: acme and status update leader uses the same ID from --election-id
 command-line option.`)
 
+	healthzPort := flag.Int("healthz-port", 0,
+		`DEPRECATED: Use --healthz-addr instead.`)
+
 	disableNodeList := flag.Bool("disable-node-list", false,
 		`DEPRECATED: This flag used to disable node listing due to missing permissions.
 Actually node listing isn't needed and it is always disabled`)
@@ -312,9 +320,7 @@ define if ingress without class should be tracked.`)
 
 	flag.Parse()
 
-	versionInfo := struct {
-		Name, Release, Build, Repository string
-	}{
+	versionInfo := VersionInfo{
 		Name:       version.NAME,
 		Release:    version.RELEASE,
 		Build:      version.COMMIT,
@@ -385,6 +391,9 @@ define if ingress without class should be tracked.`)
 
 	if *acmeElectionID != "" {
 		configLog.Info("DEPRECATED: --acme-election-id is ignored, acme and status update leader uses the same ID from --election-id command-line option.")
+	}
+	if *healthzPort > 0 {
+		configLog.Info(fmt.Sprintf("DEPRECATED: --healthz-addr=:%d should be used instead", *healthzPort))
 	}
 	if *ignoreIngressWithoutClass {
 		configLog.Info("DEPRECATED: --ignore-ingress-without-class is now ignored and can be safely removed")
@@ -596,8 +605,12 @@ define if ingress without class should be tracked.`)
 	}
 
 	disableKeywords := utils.Split(*disableConfigKeywords, ",")
-	metricsAddr := fmt.Sprintf(":%d", *metricsPort)
-	probeAddr := fmt.Sprintf(":%d", *healthzPort)
+	var healthz string
+	if *healthzPort > 0 {
+		healthz = fmt.Sprintf(":%d", *healthzPort)
+	} else {
+		healthz = *healthzAddr
+	}
 
 	return &Config{
 		AcmeCheckPeriod:          *acmeCheckPeriod,
@@ -619,7 +632,6 @@ define if ingress without class should be tracked.`)
 		DefaultDirDHParam:        defaultDirDHParam,
 		DefaultDirMaps:           defaultDirMaps,
 		DefaultDirVarRun:         defaultDirVarRun,
-		DefaultHealthzURL:        *defHealthzURL,
 		DefaultService:           *defaultSvc,
 		DefaultSSLCertificate:    *defSSLCertificate,
 		DisableExternalName:      *disableExternalName,
@@ -631,6 +643,8 @@ define if ingress without class should be tracked.`)
 		ForceNamespaceIsolation:  *forceIsolation,
 		HasGatewayA1:             hasGatewayA1,
 		HasGateway:               hasGateway,
+		HealthzAddr:              healthz,
+		HealthzURL:               *healthzURL,
 		IngressClass:             *ingressClass,
 		IngressClassPrecedence:   *ingressClassPrecedence,
 		KubeConfig:               kubeConfig,
@@ -638,17 +652,17 @@ define if ingress without class should be tracked.`)
 		MasterSocket:             *masterSocket,
 		MasterWorker:             masterWorkerCfg,
 		MaxOldConfigFiles:        *maxOldConfigFiles,
-		MetricsAddr:              metricsAddr,
-		ProbeAddr:                probeAddr,
 		Profiling:                *profiling,
 		PublishService:           *publishSvc,
 		RateLimitUpdate:          *rateLimitUpdate,
+		ReadyzURL:                *readyzURL,
 		ReloadInterval:           *reloadInterval,
 		ReloadStrategy:           *reloadStrategy,
 		ResyncPeriod:             *resyncPeriod,
 		Scheme:                   scheme,
 		SortEndpointsBy:          sortEndpoints,
 		StatsCollectProcPeriod:   *statsCollectProcPeriod,
+		StopHandler:              *stopHandler,
 		TCPConfigMapName:         *tcpConfigMapName,
 		TrackOldInstances:        *trackOldInstances,
 		UpdateStatus:             *updateStatus,
@@ -656,6 +670,7 @@ define if ingress without class should be tracked.`)
 		UseNodeInternalIP:        *useNodeInternalIP,
 		ValidateConfig:           *validateConfig,
 		VerifyHostname:           *verifyHostname,
+		VersionInfo:              versionInfo,
 		WaitBeforeShutdown:       *waitBeforeShutdown,
 		WaitBeforeUpdate:         *waitBeforeUpdate,
 		WatchIngressWithoutClass: *watchIngressWithoutClass,
@@ -712,6 +727,11 @@ func (f *float64SliceValue) String() string {
 	return fmt.Sprintf("%+v", strings.Join(s, ","))
 }
 
+// VersionInfo ...
+type VersionInfo struct {
+	Name, Release, Build, Repository string
+}
+
 // Config ...
 type Config struct {
 	AcmeCheckPeriod          time.Duration
@@ -733,7 +753,6 @@ type Config struct {
 	DefaultDirDHParam        string
 	DefaultDirMaps           string
 	DefaultDirVarRun         string
-	DefaultHealthzURL        string
 	DefaultService           string
 	DefaultSSLCertificate    string
 	DisableExternalName      bool
@@ -745,6 +764,8 @@ type Config struct {
 	ForceNamespaceIsolation  bool
 	HasGatewayA1             bool
 	HasGateway               bool
+	HealthzAddr              string
+	HealthzURL               string
 	IngressClass             string
 	IngressClassPrecedence   bool
 	KubeConfig               *rest.Config
@@ -752,17 +773,17 @@ type Config struct {
 	MasterSocket             string
 	MasterWorker             bool
 	MaxOldConfigFiles        int
-	MetricsAddr              string
-	ProbeAddr                string
 	Profiling                bool
 	PublishService           string
 	RateLimitUpdate          float64
+	ReadyzURL                string
 	ReloadInterval           time.Duration
 	ReloadStrategy           string
 	ResyncPeriod             time.Duration
 	Scheme                   *runtime.Scheme
 	SortEndpointsBy          string
 	StatsCollectProcPeriod   time.Duration
+	StopHandler              bool
 	TCPConfigMapName         string
 	TrackOldInstances        bool
 	UpdateStatus             bool
@@ -770,6 +791,7 @@ type Config struct {
 	UseNodeInternalIP        bool
 	ValidateConfig           bool
 	VerifyHostname           bool
+	VersionInfo              VersionInfo
 	WaitBeforeShutdown       int
 	WaitBeforeUpdate         time.Duration
 	WatchIngressWithoutClass bool
