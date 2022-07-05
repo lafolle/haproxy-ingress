@@ -188,7 +188,7 @@ one, applying every new configuration changes made between this interval`)
 		`Amount of time to wait before start a reconciliation and update haproxy, giving
 the time to receive all/most of the changes of a batch update.`)
 
-	resyncPeriod := flag.Duration("sync-period", 600*time.Second,
+	resyncPeriod := flag.Duration("sync-period", 10*time.Hour,
 		`Configures the default resync period of Kubernetes' informer factory.`)
 
 	watchNamespace := flag.String("watch-namespace", v1.NamespaceAll,
@@ -531,13 +531,13 @@ define if ingress without class should be tracked.`)
 
 	if *rateLimitUpdate < 0.05 {
 		return nil, fmt.Errorf(
-			"rate limit update (%v) is too low: '%v' seconds between Ingress reloads. Use at least 0.05, which means 20 seconds between reloads",
+			"rate limit update (%v) is too low: '%v' seconds between Ingress reloads. Use at least 0.05, which means 20 seconds between updates",
 			*rateLimitUpdate, 1.0 / *rateLimitUpdate)
 	}
 
 	if *rateLimitUpdate > 10 {
 		return nil, fmt.Errorf(
-			"rate limit update is too high: up to '%v' Ingress reloads per second (max is 10)",
+			"rate limit update is too high: up to '%v' Ingress updates per second (max is 10)",
 			*rateLimitUpdate)
 	}
 
@@ -658,7 +658,7 @@ define if ingress without class should be tracked.`)
 		ReadyzURL:                *readyzURL,
 		ReloadInterval:           *reloadInterval,
 		ReloadStrategy:           *reloadStrategy,
-		ResyncPeriod:             *resyncPeriod,
+		ResyncPeriod:             resyncPeriod,
 		Scheme:                   scheme,
 		SortEndpointsBy:          sortEndpoints,
 		StatsCollectProcPeriod:   *statsCollectProcPeriod,
@@ -779,7 +779,7 @@ type Config struct {
 	ReadyzURL                string
 	ReloadInterval           time.Duration
 	ReloadStrategy           string
-	ResyncPeriod             time.Duration
+	ResyncPeriod             *time.Duration
 	Scheme                   *runtime.Scheme
 	SortEndpointsBy          string
 	StatsCollectProcPeriod   time.Duration

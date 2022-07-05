@@ -350,7 +350,7 @@ func (h *hdlr) compose(ev string, obj client.Object) {
 }
 
 func (h *hdlr) notify(o client.Object, q workqueue.RateLimitingInterface) {
-	q.AddAfter(reconcile.Request{}, h.w.cfg.WaitBeforeUpdate)
+	q.AddRateLimited(reconcile.Request{})
 	if o != nil && h.w.run {
 		h.w.log.Info("notify", "kind", reflect.TypeOf(o), "namespace", o.GetNamespace(), "name", o.GetName())
 	}
