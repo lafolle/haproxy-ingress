@@ -55,7 +55,7 @@ func (r *IngressReconciler) leaderChanged(isLeader bool) {
 
 // SetupWithManager ...
 func (r *IngressReconciler) SetupWithManager(ctx context.Context, mgr ctrl.Manager) error {
-	r.watchers = createWatchers(ctx, r.Config)
+	r.watchers = createWatchers(ctx, r.Config, r.Services.GetIsValidResource())
 	opt := controller.Options{
 		Log:          logr.FromContextOrDiscard(ctx),
 		RateLimiter:  createRateLimiter(r.Config),

@@ -121,7 +121,7 @@ func (c *c) getCertificate(namespace, secretName string) (*sslCert, error) {
 	return c.sslCerts.getCertificate(&secret)
 }
 
-func (c *c) isValidIngress(ing *networking.Ingress) bool {
+func (c *c) IsValidIngress(ing *networking.Ingress) bool {
 	// check if ingress `hasAnn` and, if so, if it's valid `fromAnn` perspective
 	var hasAnn, fromAnn bool
 	var ann string
@@ -137,7 +137,7 @@ func (c *c) isValidIngress(ing *networking.Ingress) bool {
 	if className := ing.Spec.IngressClassName; className != nil {
 		hasClass = true
 		if ingClass, err := c.GetIngressClass(*className); ingClass != nil {
-			fromClass = c.isValidIngressClass(ingClass)
+			fromClass = c.IsValidIngressClass(ingClass)
 		} else if err != nil {
 			c.log.Error(err, "error reading IngressClass", "IngressClass", *className)
 		} else {
@@ -167,11 +167,11 @@ func (c *c) isValidIngress(ing *networking.Ingress) bool {
 	return fromAnn
 }
 
-func (c *c) isValidIngressClass(ingressClass *networking.IngressClass) bool {
+func (c *c) IsValidIngressClass(ingressClass *networking.IngressClass) bool {
 	return ingressClass.Spec.Controller == c.config.ControllerName
 }
 
-func (c *c) isValidGatewayA1(gw *gatewayv1alpha1.Gateway) bool {
+func (c *c) IsValidGatewayA1(gw *gatewayv1alpha1.Gateway) bool {
 	className := gw.Spec.GatewayClassName
 	gwClass, err := c.getGatewayClassA1(className)
 	if err != nil {
@@ -181,10 +181,10 @@ func (c *c) isValidGatewayA1(gw *gatewayv1alpha1.Gateway) bool {
 		c.log.Error(nil, "GatewayClass v1alpha1 not found", "classname", className)
 		return false
 	}
-	return c.isValidGatewayClassA1(gwClass)
+	return c.IsValidGatewayClassA1(gwClass)
 }
 
-func (c *c) isValidGateway(gw *gatewayv1alpha2.Gateway) bool {
+func (c *c) IsValidGateway(gw *gatewayv1alpha2.Gateway) bool {
 	className := gw.Spec.GatewayClassName
 	gwClass, err := c.getGatewayClass(string(className))
 	if err != nil {
@@ -194,14 +194,14 @@ func (c *c) isValidGateway(gw *gatewayv1alpha2.Gateway) bool {
 		c.log.Error(nil, "GatewayClass v1alpha2 not found", "classname", className)
 		return false
 	}
-	return c.isValidGatewayClass(gwClass)
+	return c.IsValidGatewayClass(gwClass)
 }
 
-func (c *c) isValidGatewayClassA1(gwClass *gatewayv1alpha1.GatewayClass) bool {
+func (c *c) IsValidGatewayClassA1(gwClass *gatewayv1alpha1.GatewayClass) bool {
 	return gwClass.Spec.Controller == c.config.ControllerName
 }
 
-func (c *c) isValidGatewayClass(gwClass *gatewayv1alpha2.GatewayClass) bool {
+func (c *c) IsValidGatewayClass(gwClass *gatewayv1alpha2.GatewayClass) bool {
 	return gwClass.Spec.ControllerName == gatewayv1alpha2.GatewayController(c.config.ControllerName)
 }
 
@@ -233,7 +233,7 @@ func (c *c) ExternalNameLookup(externalName string) ([]net.IP, error) {
 func (c *c) GetIngress(ingressName string) (*networking.Ingress, error) {
 	ing := networking.Ingress{}
 	err := c.get(ingressName, &ing)
-	if err == nil && !c.isValidIngress(&ing) {
+	if err == nil && !c.IsValidIngress(&ing) {
 		return nil, fmt.Errorf("ingress class does not match")
 	}
 	return &ing, err
@@ -248,7 +248,7 @@ func (c *c) GetIngressList() ([]*networking.Ingress, error) {
 	var i int
 	for j := range list.Items {
 		ing := &list.Items[j]
-		if c.isValidIngress(ing) {
+		if c.IsValidIngress(ing) {
 			items[i] = ing
 			i++
 		}
@@ -265,7 +265,7 @@ func (c *c) GetIngressClass(className string) (*networking.IngressClass, error) 
 func (c *c) GetGatewayA1(gatewayName string) (*gatewayv1alpha1.Gateway, error) {
 	gateway := gatewayv1alpha1.Gateway{}
 	err := c.client.Get(c.ctx, types.NamespacedName{}, &gateway)
-	if err == nil && !c.isValidGatewayA1(&gateway) {
+	if err == nil && !c.IsValidGatewayA1(&gateway) {
 		return nil, fmt.Errorf("gateway class does not match")
 	}
 	return &gateway, err
@@ -283,7 +283,7 @@ func (c *c) GetGatewayA1List() ([]*gatewayv1alpha1.Gateway, error) {
 	validList := make([]*gatewayv1alpha1.Gateway, 0, len(list.Items))
 	for i := range list.Items {
 		gw := &list.Items[i]
-		if c.isValidGatewayA1(gw) {
+		if c.IsValidGatewayA1(gw) {
 			validList = append(validList, gw)
 		}
 	}
@@ -327,7 +327,7 @@ func (c *c) GetGatewayMap() (map[string]*gatewayv1alpha2.Gateway, error) {
 	validList := make(map[string]*gatewayv1alpha2.Gateway, len(list.Items))
 	for i := range list.Items {
 		gw := &list.Items[i]
-		if c.isValidGateway(gw) {
+		if c.IsValidGateway(gw) {
 			validList[gw.Namespace+"/"+gw.Name] = gw
 		}
 	}

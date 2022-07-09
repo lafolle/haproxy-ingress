@@ -47,6 +47,7 @@ type Services struct {
 	converterOpt *convtypes.ConverterOptions
 	acmeClient   *svcAcmeClient
 	acmeServer   *svcAcmeServer
+	cache        *c
 	instance     haproxy.Instance
 	metrics      *metrics
 	modelMutex   sync.Mutex
@@ -164,6 +165,7 @@ func (s *Services) setup(ctx context.Context) error {
 	s.converterOpt = converterOptions
 	s.acmeClient = acmeClient
 	s.acmeServer = acmeServer
+	s.cache = cache
 	s.instance = instance
 	s.metrics = metrics
 	s.modelMutex = sync.Mutex{}
@@ -227,6 +229,11 @@ func (s *Services) acmeExternalCallCheck() (count int, err error) {
 
 func (s *Services) acmePeriodicCheck() (count int, err error) {
 	return s.acmeCheck("periodic check")
+}
+
+// GetIsValidResource ...
+func (s *Services) GetIsValidResource() IsValidResource {
+	return s.cache
 }
 
 // ReconcileIngress ...

@@ -36,14 +36,16 @@ import (
 	gatewayv1alpha2 "sigs.k8s.io/gateway-api/apis/v1alpha2"
 
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/controller/config"
+	"github.com/jcmoraisjr/haproxy-ingress/pkg/controller/services"
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/converters/types"
 )
 
-func createWatchers(ctx context.Context, cfg *config.Config) *watchers {
+func createWatchers(ctx context.Context, cfg *config.Config, val services.IsValidResource) *watchers {
 	w := &watchers{
 		mu:  sync.Mutex{},
 		log: logr.FromContextOrDiscard(ctx).WithName("watchers"),
 		cfg: cfg,
+		val: val,
 	}
 	w.initCh()
 	return w
@@ -54,6 +56,7 @@ type watchers struct {
 	ch  *types.ChangedObjects
 	log logr.Logger
 	cfg *config.Config
+	val services.IsValidResource
 	run bool
 }
 
@@ -115,7 +118,9 @@ func (w *watchers) handlersCore() []*hdlr {
 			typ: &api.ConfigMap{},
 			res: types.ResourceConfigMap,
 			add: cmChange,
-			upd: cmChange,
+			upd: func(old, new client.Object) {
+				cmChange(new)
+			},
 			pr: []predicate.Predicate{
 				predicate.NewPredicateFuncs(func(o client.Object) bool {
 					cm := o.(*api.ConfigMap)
@@ -127,16 +132,25 @@ func (w *watchers) handlersCore() []*hdlr {
 		{
 			typ: &api.Service{},
 			res: types.ResourceService,
-			pr: []predicate.Predicate{predicate.Or(
-				predicate.AnnotationChangedPredicate{},
-				predicate.GenerationChangedPredicate{},
-			)},
+			pr: []predicate.Predicate{
+				predicate.Or(
+					predicate.AnnotationChangedPredicate{},
+					predicate.GenerationChangedPredicate{},
+				),
+			},
 		},
 		{
 			typ: &api.Endpoints{},
 			res: types.ResourceEndpoints,
 			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
+				predicate.Funcs{
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						old := ue.ObjectOld.(*api.Endpoints)
+						new := ue.ObjectNew.(*api.Endpoints)
+						return !reflect.DeepEqual(old.Subsets, new.Subsets)
+					},
+				},
 			},
 		},
 		{
@@ -150,12 +164,7 @@ func (w *watchers) handlersCore() []*hdlr {
 				predicate.Funcs{
 					CreateFunc: func(e event.CreateEvent) bool { return false },
 					UpdateFunc: func(e event.UpdateEvent) bool {
-						if e.ObjectOld == nil || e.ObjectNew == nil {
-							return true
-						}
-						old := e.ObjectOld.(*api.Pod)
-						new := e.ObjectNew.(*api.Pod)
-						return old.DeletionTimestamp != new.DeletionTimestamp
+						return e.ObjectOld.GetDeletionTimestamp() != e.ObjectNew.GetDeletionTimestamp()
 					},
 				},
 			},
@@ -171,24 +180,59 @@ func (w *watchers) handlersIngress() []*hdlr {
 			add: func(o client.Object) {
 				w.ch.IngressesAdd = append(w.ch.IngressesAdd, o.(*networking.Ingress))
 			},
-			upd: func(o client.Object) {
-				w.ch.IngressesUpd = append(w.ch.IngressesUpd, o.(*networking.Ingress))
+			upd: func(old, new client.Object) {
+				oldIng := old.(*networking.Ingress)
+				newIng := new.(*networking.Ingress)
+				oldValid := w.val.IsValidIngress(oldIng)
+				newValid := w.val.IsValidIngress(newIng)
+				if oldValid && newValid {
+					w.ch.IngressesUpd = append(w.ch.IngressesUpd, newIng)
+				} else if !oldValid && newValid {
+					w.ch.IngressesAdd = append(w.ch.IngressesAdd, newIng)
+				} else if oldValid && !newValid {
+					w.ch.IngressesDel = append(w.ch.IngressesDel, oldIng)
+				}
 			},
 			del: func(o client.Object) {
-				w.ch.IngressesDel = append(w.ch.IngressesUpd, o.(*networking.Ingress))
+				w.ch.IngressesDel = append(w.ch.IngressesDel, o.(*networking.Ingress))
 			},
-			// TODO: apply rules from legacy lister
-			pr: []predicate.Predicate{predicate.Or(
-				predicate.AnnotationChangedPredicate{},
-				predicate.GenerationChangedPredicate{},
-			)},
+			pr: []predicate.Predicate{
+				predicate.Or(
+					predicate.AnnotationChangedPredicate{},
+					predicate.GenerationChangedPredicate{},
+				),
+				predicate.Funcs{
+					CreateFunc: func(ce event.CreateEvent) bool {
+						return w.val.IsValidIngress(ce.Object.(*networking.Ingress))
+					},
+					DeleteFunc: func(de event.DeleteEvent) bool {
+						return w.val.IsValidIngress(de.Object.(*networking.Ingress))
+					},
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						return w.val.IsValidIngress(ue.ObjectOld.(*networking.Ingress)) ||
+							w.val.IsValidIngress(ue.ObjectNew.(*networking.Ingress))
+					},
+				},
+			},
 		},
 		{
 			typ: &networking.IngressClass{},
 			res: types.ResourceIngressClass,
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+				predicate.Funcs{
+					CreateFunc: func(ce event.CreateEvent) bool {
+						return w.val.IsValidIngressClass(ce.Object.(*networking.IngressClass))
+					},
+					DeleteFunc: func(de event.DeleteEvent) bool {
+						return w.val.IsValidIngressClass(de.Object.(*networking.IngressClass))
+					},
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						return w.val.IsValidIngressClass(ue.ObjectOld.(*networking.IngressClass)) ||
+							w.val.IsValidIngressClass(ue.ObjectNew.(*networking.IngressClass))
+					},
+				},
+			},
 		},
 	}
 }
@@ -201,29 +245,63 @@ func (w *watchers) handlersGatewayv1alpha1() []*hdlr {
 			add: func(o client.Object) {
 				w.ch.GatewaysA1Add = append(w.ch.GatewaysA1Add, o.(*gatewayv1alpha1.Gateway))
 			},
-			upd: func(o client.Object) {
-				w.ch.GatewaysA1Upd = append(w.ch.GatewaysA1Upd, o.(*gatewayv1alpha1.Gateway))
+			upd: func(old, new client.Object) {
+				oldgw := old.(*gatewayv1alpha1.Gateway)
+				newgw := new.(*gatewayv1alpha1.Gateway)
+				oldValid := w.val.IsValidGatewayA1(oldgw)
+				newValid := w.val.IsValidGatewayA1(newgw)
+				if oldValid && newValid {
+					w.ch.GatewaysA1Upd = append(w.ch.GatewaysA1Upd, newgw)
+				} else if !oldValid && newValid {
+					w.ch.GatewaysA1Add = append(w.ch.GatewaysA1Add, newgw)
+				} else if oldValid && !newValid {
+					w.ch.GatewaysA1Del = append(w.ch.GatewaysA1Del, oldgw)
+				}
 			},
 			del: func(o client.Object) {
 				w.ch.GatewaysA1Del = append(w.ch.GatewaysA1Del, o.(*gatewayv1alpha1.Gateway))
 			},
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+				predicate.Funcs{
+					CreateFunc: func(ce event.CreateEvent) bool {
+						return w.val.IsValidGatewayA1(ce.Object.(*gatewayv1alpha1.Gateway))
+					},
+					DeleteFunc: func(de event.DeleteEvent) bool {
+						return w.val.IsValidGatewayA1(de.Object.(*gatewayv1alpha1.Gateway))
+					},
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						return w.val.IsValidGatewayA1(ue.ObjectOld.(*gatewayv1alpha1.Gateway)) ||
+							w.val.IsValidGatewayA1(ue.ObjectNew.(*gatewayv1alpha1.Gateway))
+					},
+				},
+			},
 		},
 		{
 			typ: &gatewayv1alpha1.GatewayClass{},
 			res: types.ResourceGatewayClassA1,
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+				predicate.Funcs{
+					CreateFunc: func(ce event.CreateEvent) bool {
+						return w.val.IsValidGatewayClassA1(ce.Object.(*gatewayv1alpha1.GatewayClass))
+					},
+					DeleteFunc: func(de event.DeleteEvent) bool {
+						return w.val.IsValidGatewayClassA1(de.Object.(*gatewayv1alpha1.GatewayClass))
+					},
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						return w.val.IsValidGatewayClassA1(ue.ObjectOld.(*gatewayv1alpha1.GatewayClass)) ||
+							w.val.IsValidGatewayClassA1(ue.ObjectNew.(*gatewayv1alpha1.GatewayClass))
+					},
+				},
+			},
 		},
 		{
 			typ: &gatewayv1alpha1.HTTPRoute{},
 			res: types.ResourceHTTPRouteA1,
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+			},
 		},
 	}
 }
@@ -236,29 +314,51 @@ func (w *watchers) handlersGatewayv1alpha2() []*hdlr {
 			add: func(o client.Object) {
 				w.ch.GatewaysAdd = append(w.ch.GatewaysAdd, o.(*gatewayv1alpha2.Gateway))
 			},
-			upd: func(o client.Object) {
-				w.ch.GatewaysUpd = append(w.ch.GatewaysUpd, o.(*gatewayv1alpha2.Gateway))
+			upd: func(old, new client.Object) {
+				oldgw := old.(*gatewayv1alpha2.Gateway)
+				newgw := new.(*gatewayv1alpha2.Gateway)
+				oldValid := w.val.IsValidGateway(oldgw)
+				newValid := w.val.IsValidGateway(newgw)
+				if oldValid && newValid {
+					w.ch.GatewaysUpd = append(w.ch.GatewaysUpd, newgw)
+				} else if !oldValid && newValid {
+					w.ch.GatewaysAdd = append(w.ch.GatewaysAdd, newgw)
+				} else if oldValid && !newValid {
+					w.ch.GatewaysDel = append(w.ch.GatewaysDel, oldgw)
+				}
 			},
 			del: func(o client.Object) {
 				w.ch.GatewaysDel = append(w.ch.GatewaysDel, o.(*gatewayv1alpha2.Gateway))
 			},
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+			},
 		},
 		{
 			typ: &gatewayv1alpha2.GatewayClass{},
 			res: types.ResourceGatewayClass,
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+				predicate.Funcs{
+					CreateFunc: func(ce event.CreateEvent) bool {
+						return w.val.IsValidGatewayClass(ce.Object.(*gatewayv1alpha2.GatewayClass))
+					},
+					DeleteFunc: func(de event.DeleteEvent) bool {
+						return w.val.IsValidGatewayClass(de.Object.(*gatewayv1alpha2.GatewayClass))
+					},
+					UpdateFunc: func(ue event.UpdateEvent) bool {
+						return w.val.IsValidGatewayClass(ue.ObjectOld.(*gatewayv1alpha2.GatewayClass)) ||
+							w.val.IsValidGatewayClass(ue.ObjectNew.(*gatewayv1alpha2.GatewayClass))
+					},
+				},
+			},
 		},
 		{
 			typ: &gatewayv1alpha2.HTTPRoute{},
 			res: types.ResourceHTTPRoute,
-			pr: []predicate.Predicate{predicate.Or(
+			pr: []predicate.Predicate{
 				predicate.GenerationChangedPredicate{},
-			)},
+			},
 		},
 	}
 }
@@ -269,8 +369,8 @@ type hdlr struct {
 	res types.ResourceType
 	pr  []predicate.Predicate
 	add,
-	upd,
 	del func(o client.Object)
+	upd func(old, new client.Object)
 }
 
 func (h *hdlr) getSource() source.Source {
@@ -288,42 +388,30 @@ func (h *hdlr) getPredicates() []predicate.Predicate {
 func (h *hdlr) Create(e event.CreateEvent, q workqueue.RateLimitingInterface) {
 	h.w.mu.Lock()
 	defer h.w.mu.Unlock()
-	if e.Object != nil {
-		if h.add != nil {
-			h.add(e.Object)
-		}
-		h.compose("add", e.Object)
-	} else {
-		h.generic()
+	if h.add != nil {
+		h.add(e.Object)
 	}
+	h.compose("add", e.Object)
 	h.notify(e.Object, q)
 }
 
 func (h *hdlr) Update(e event.UpdateEvent, q workqueue.RateLimitingInterface) {
 	h.w.mu.Lock()
 	defer h.w.mu.Unlock()
-	if e.ObjectOld != nil && e.ObjectNew != nil {
-		if h.upd != nil {
-			h.upd(e.ObjectNew)
-		}
-		h.compose("update", e.ObjectNew)
-	} else {
-		h.generic()
+	if h.upd != nil {
+		h.upd(e.ObjectOld, e.ObjectNew)
 	}
+	h.compose("update", e.ObjectNew)
 	h.notify(e.ObjectNew, q)
 }
 
 func (h *hdlr) Delete(e event.DeleteEvent, q workqueue.RateLimitingInterface) {
 	h.w.mu.Lock()
 	defer h.w.mu.Unlock()
-	if e.Object != nil {
-		if h.del != nil {
-			h.del(e.Object)
-		}
-		h.compose("del", e.Object)
-	} else {
-		h.generic()
+	if h.del != nil {
+		h.del(e.Object)
 	}
+	h.compose("del", e.Object)
 	h.notify(e.Object, q)
 }
 
@@ -345,8 +433,8 @@ func (h *hdlr) compose(ev string, obj client.Object) {
 		fullname = ns + "/" + fullname
 	}
 	ch := h.w.ch
-	ch.Links[h.res] = append(ch.Links[h.res], fullname)
-	ch.Objects = append(ch.Objects, fmt.Sprintf("%s/%s:%s", ev, h.res, fullname))
+	ch.Links[h.res] = appenddedup(ch.Links[h.res], fullname)
+	ch.Objects = appenddedup(ch.Objects, fmt.Sprintf("%s/%s:%s", ev, h.res, fullname))
 }
 
 func (h *hdlr) notify(o client.Object, q workqueue.RateLimitingInterface) {
@@ -354,4 +442,13 @@ func (h *hdlr) notify(o client.Object, q workqueue.RateLimitingInterface) {
 	if o != nil && h.w.run {
 		h.w.log.Info("notify", "kind", reflect.TypeOf(o), "namespace", o.GetNamespace(), "name", o.GetName())
 	}
+}
+
+func appenddedup(slice []string, s string) []string {
+	for _, item := range slice {
+		if item == s {
+			return slice
+		}
+	}
+	return append(slice, s)
 }
