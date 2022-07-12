@@ -46,6 +46,7 @@ func Run() {
 		LeaderElectionID:        config.ElectionID,
 		LeaderElectionNamespace: config.ElectionNamespace,
 		SyncPeriod:              config.ResyncPeriod,
+		GracefulShutdownTimeout: config.ShutdownTimeout,
 		HealthProbeBindAddress:  "0",
 		MetricsBindAddress:      "0",
 	})

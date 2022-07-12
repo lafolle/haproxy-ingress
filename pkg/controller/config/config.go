@@ -20,6 +20,7 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"net"
 	"os"
 	"regexp"
 	"strconv"
@@ -161,6 +162,10 @@ the haproxy's admin socket. The response time unit is in seconds.`)
 controller will set the endpoint records on the ingress objects to reflect
 those on the service.`)
 
+	publishAddress := flag.String("publish-address", "",
+		`Comma separated list of hostname/IP addresses that should be used to configure
+ingress status. This option cannot be used if --publish-service is configured`)
+
 	tcpConfigMapName := flag.String("tcp-services-configmap", "",
 		`Name of the ConfigMap that contains the definition of the TCP services to
 expose. The key in the map indicates the external port to be used. The value is
@@ -239,6 +244,11 @@ namespace than the specified in the flag --watch-namespace.`)
 	waitBeforeShutdown := flag.Int("wait-before-shutdown", 0,
 		`Define time controller waits until it shuts down when SIGTERM signal was
 received`)
+
+	shutdownTimeout := flag.Duration("shutdown-timeout", 25*time.Second,
+		`Defines the amount of time the controller should wait, after receiving a
+SIGINT or a SIGTERM, for all of its internal services to gracefully stop before
+shutting down the process`)
 
 	allowCrossNamespace := flag.Bool("allow-cross-namespace", false,
 		`Defines if the ingress controller can reference resources of another
@@ -432,13 +442,34 @@ define if ingress without class should be tracked.`)
 		gatewayv1alpha2.GroupVersion,
 		"gatewayclass", "gateway", "httproute")
 
-	election := *updateStatus || *acmeServer || hasGatewayA1 || hasGateway
-	var podNamespace string
-	if election {
-		podNamespace = os.Getenv("POD_NAMESPACE")
-		if podNamespace == "" {
-			return nil, fmt.Errorf("missing POD_NAMESPACE envvar")
+	if *publishSvc != "" && *publishAddress != "" {
+		return nil, fmt.Errorf("configure only one of --publish-service or --publish-address")
+	}
+
+	var publishAddressHostnames, publishAddressIPs []string
+	for _, addr := range strings.Split(*publishAddress, ",") {
+		if addr == "" {
+			continue
 		}
+		if net.ParseIP(addr) == nil {
+			publishAddressHostnames = append(publishAddressHostnames, addr)
+		} else {
+			publishAddressIPs = append(publishAddressIPs, addr)
+		}
+	}
+
+	podNamespace := os.Getenv("POD_NAMESPACE")
+	podName := os.Getenv("POD_NAME")
+
+	// we could `|| hasGatewayA1 || hasGateway` instead of `|| *watchGateway` here,
+	// but we're choosing a consistent startup behavior despite of the cluster configuration.
+	election := *updateStatus || *acmeServer || *watchGateway
+	if election && podNamespace == "" {
+		return nil, fmt.Errorf("POD_NAMESPACE envvar should be configured when --update-status=true, --acme-server=true, or --watch-gateway=true")
+	}
+
+	if *updateStatus && podName == "" && *publishSvc == "" && len(publishAddressHostnames)+len(publishAddressIPs) == 0 {
+		return nil, fmt.Errorf("one of --publish-service, --publish-address or POD_NAME envvar should be configured when --update-status=true")
 	}
 
 	acmeSecretKeyNamespaceName := *acmeSecretKeyName
@@ -652,7 +683,11 @@ define if ingress without class should be tracked.`)
 		MasterSocket:             *masterSocket,
 		MasterWorker:             masterWorkerCfg,
 		MaxOldConfigFiles:        *maxOldConfigFiles,
+		PodName:                  podName,
+		PodNamespace:             podNamespace,
 		Profiling:                *profiling,
+		PublishAddressHostnames:  publishAddressHostnames,
+		PublishAddressIPs:        publishAddressIPs,
 		PublishService:           *publishSvc,
 		RateLimitUpdate:          *rateLimitUpdate,
 		ReadyzURL:                *readyzURL,
@@ -660,6 +695,7 @@ define if ingress without class should be tracked.`)
 		ReloadStrategy:           *reloadStrategy,
 		ResyncPeriod:             resyncPeriod,
 		Scheme:                   scheme,
+		ShutdownTimeout:          shutdownTimeout,
 		SortEndpointsBy:          sortEndpoints,
 		StatsCollectProcPeriod:   *statsCollectProcPeriod,
 		StopHandler:              *stopHandler,
@@ -773,7 +809,11 @@ type Config struct {
 	MasterSocket             string
 	MasterWorker             bool
 	MaxOldConfigFiles        int
+	PodName                  string
+	PodNamespace             string
 	Profiling                bool
+	PublishAddressHostnames  []string
+	PublishAddressIPs        []string
 	PublishService           string
 	RateLimitUpdate          float64
 	ReadyzURL                string
@@ -781,6 +821,7 @@ type Config struct {
 	ReloadStrategy           string
 	ResyncPeriod             *time.Duration
 	Scheme                   *runtime.Scheme
+	ShutdownTimeout          *time.Duration
 	SortEndpointsBy          string
 	StatsCollectProcPeriod   time.Duration
 	StopHandler              bool
