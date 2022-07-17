@@ -254,11 +254,6 @@ shutting down the process`)
 		`Defines if the ingress controller can reference resources of another
 namespaces. Cannot be used if force-namespace-isolation is true`)
 
-	disablePodList := flag.Bool("disable-pod-list", false,
-		`Defines if HAProxy Ingress should disable pod watch and in memory list. Pod
-list is mandatory for drain-support (should not be disabled) and optional for
-blue/green.`)
-
 	disableExternalName := flag.Bool("disable-external-name", false,
 		`Disables services of type ExternalName`)
 
@@ -310,6 +305,10 @@ verbosity debug.`)
 		`Configures the encode time used in the logs. Options are: rfc3339nano, rfc3339,
 iso8601, millis, nanos.`)
 
+	//
+	// Deprecated options
+	//
+
 	acmeElectionID := flag.String("acme-election-id", "",
 		`DEPRECATED: acme and status update leader uses the same ID from --election-id
 command-line option.`)
@@ -320,6 +319,11 @@ command-line option.`)
 	disableNodeList := flag.Bool("disable-node-list", false,
 		`DEPRECATED: This flag used to disable node listing due to missing permissions.
 Actually node listing isn't needed and it is always disabled`)
+
+	disablePodList := flag.Bool("disable-pod-list", false,
+		`DEPRECATED: used to define if HAProxy Ingress should disable pod watch and in
+memory list. This configuration is now ignored, the controller-runtime takes
+care of it.`)
 
 	ignoreIngressWithoutClass := flag.Bool("ignore-ingress-without-class", false,
 		`DEPRECATED: Use --watch-ingress-without-class command-line option instead to
@@ -410,6 +414,9 @@ define if ingress without class should be tracked.`)
 	}
 	if *disableNodeList {
 		configLog.Info("DEPRECATED: --disable-node-list is now ignored and can be safely removed")
+	}
+	if *disablePodList {
+		configLog.Info("DEPRECATED: --disable-pod-list is ignored, controller-runtime automatically configures this option.")
 	}
 
 	if *ingressClass != "" {
@@ -667,7 +674,6 @@ define if ingress without class should be tracked.`)
 		DefaultSSLCertificate:    *defSSLCertificate,
 		DisableExternalName:      *disableExternalName,
 		DisableKeywords:          disableKeywords,
-		DisablePodList:           *disablePodList,
 		Election:                 election,
 		ElectionID:               *electionID,
 		ElectionNamespace:        podNamespace,
@@ -793,7 +799,6 @@ type Config struct {
 	DefaultSSLCertificate    string
 	DisableExternalName      bool
 	DisableKeywords          []string
-	DisablePodList           bool
 	Election                 bool
 	ElectionID               string
 	ElectionNamespace        string
