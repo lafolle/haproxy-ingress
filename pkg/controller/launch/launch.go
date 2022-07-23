@@ -17,9 +17,9 @@ limitations under the License.
 package launch
 
 import (
+	"log"
 	"os"
 
-	"github.com/go-logr/logr"
 	ctrl "sigs.k8s.io/controller-runtime"
 
 	"github.com/jcmoraisjr/haproxy-ingress/pkg/controller/config"
@@ -29,14 +29,15 @@ import (
 
 // Run ...
 func Run() {
-	rootLogger := ctrl.Log
-	ctx := logr.NewContext(ctrl.SetupSignalHandler(), rootLogger)
-	config, err := config.Create(ctx)
-	launchLog := rootLogger.WithName("launch")
+	config, err := config.Create()
 	if err != nil {
-		launchLog.Error(err, "unable to parse static config")
+		log.Printf("unable to parse static config: %s\n", err)
 		os.Exit(1)
 	}
+
+	rootLogger := ctrl.Log
+	launchLog := rootLogger.WithName("launch")
+	ctx := config.RootContext
 
 	launchLog.Info("configuring manager")
 	mgr, err := ctrl.NewManager(config.KubeConfig, ctrl.Options{

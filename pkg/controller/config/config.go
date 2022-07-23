@@ -22,9 +22,11 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/signal"
 	"regexp"
 	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/go-logr/logr"
@@ -54,7 +56,7 @@ import (
 )
 
 // Create ...
-func Create(ctx context.Context) (*Config, error) {
+func Create() (*Config, error) {
 	// controller-runtime already declares --kubeconfig
 	kubeconfig := flag.Lookup("kubeconfig")
 
@@ -235,14 +237,15 @@ Ingress resources that this controller is tracking.`)
 	electionID := flag.String("election-id", "fc5ae9f3.haproxy-ingress.github.io",
 		`Election id to be used for status update and certificate sign.`)
 
-	waitBeforeShutdown := flag.Int("wait-before-shutdown", 0,
-		`Define time controller waits until it shuts down when SIGTERM signal was
-received`)
+	waitBeforeShutdown := flag.String("wait-before-shutdown", "",
+		`Defines the amount of time the controller should wait between receiving a
+SIGINT or SIGTERM signal, and notifying the controller manager to gracefully
+stops the controller. Use with a time suffix.`)
 
 	shutdownTimeout := flag.Duration("shutdown-timeout", 25*time.Second,
-		`Defines the amount of time the controller should wait, after receiving a
-SIGINT or a SIGTERM, for all of its internal services to gracefully stop before
-shutting down the process`)
+		`Defines the amount of time the controller should wait for all of its internal
+services to gracefully stop. It starts to count after --wait-before-shutdown
+has been passed, if configured.`)
 
 	allowCrossNamespace := flag.Bool("allow-cross-namespace", false,
 		`Defines if the ingress controller can reference resources of another
@@ -346,7 +349,6 @@ define if ingress without class should be tracked.`)
 		os.Exit(0)
 	}
 
-	// Logger must be configured before the first `return`
 	ctrl.SetLogger(ctrlzap.New(ctrlzap.UseFlagOptions(&ctrlzap.Options{
 		Development:     *logDev,
 		Level:           zapcore.Level(1 - *logLevel),
@@ -361,7 +363,9 @@ define if ingress without class should be tracked.`)
 			zap.AddCallerSkip(-1),
 		},
 	})))
-	configLog := logr.FromContextOrDiscard(ctx).WithName("config")
+
+	rootLogger := ctrl.Log
+	configLog := rootLogger.WithName("config")
 
 	scheme := runtime.NewScheme()
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
@@ -429,6 +433,22 @@ define if ingress without class should be tracked.`)
 	if *ingressClass != "" {
 		configLog.Info("watching for ingress resources with 'kubernetes.io/ingress.class'", "annotation", *ingressClass)
 	}
+
+	var waitShutdown time.Duration
+	if *waitBeforeShutdown != "" {
+		var err error
+		waitShutdown, err = time.ParseDuration(*waitBeforeShutdown)
+		if err != nil {
+			waitInt, err := strconv.Atoi(*waitBeforeShutdown)
+			if err != nil {
+				return nil, fmt.Errorf("--wait-before-shutdown='%s' is neither a valid int (seconds) nor a valid duration", *waitBeforeShutdown)
+			}
+			configLog.Info(fmt.Sprintf("DEPRECATED: --wait-before-shutdown=%s is missing a time suffix", *waitBeforeShutdown))
+			waitShutdown = time.Duration(waitInt) * time.Second
+		}
+	}
+
+	ctx := logr.NewContext(createRootContext(rootLogger, waitShutdown), rootLogger)
 
 	controllerName := "haproxy-ingress.github.io/controller"
 	if *controllerClass != "" {
@@ -707,6 +727,7 @@ define if ingress without class should be tracked.`)
 		ReloadInterval:           *reloadInterval,
 		ReloadStrategy:           *reloadStrategy,
 		ResyncPeriod:             resyncPeriod,
+		RootContext:              ctx,
 		Scheme:                   scheme,
 		ShutdownTimeout:          shutdownTimeout,
 		SortEndpointsBy:          sortEndpoints,
@@ -720,11 +741,34 @@ define if ingress without class should be tracked.`)
 		ValidateConfig:           *validateConfig,
 		VerifyHostname:           *verifyHostname,
 		VersionInfo:              versionInfo,
-		WaitBeforeShutdown:       *waitBeforeShutdown,
 		WaitBeforeUpdate:         *waitBeforeUpdate,
 		WatchIngressWithoutClass: *watchIngressWithoutClass,
 		WatchNamespace:           *watchNamespace,
 	}, nil
+}
+
+func createRootContext(rootLogger logr.Logger, waitShutdown time.Duration) context.Context {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := make(chan os.Signal, 3)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		log := rootLogger.WithName("signal")
+		s := <-c
+		log.Info("signal received", "signal", s.String())
+		if waitShutdown > 0 {
+			log.Info("waiting before shutdown controller manager", "duration", waitShutdown.String())
+			select {
+			case <-time.After(waitShutdown):
+			case <-c:
+				log.Info("skipping wait shutdown")
+			}
+		}
+		cancel()
+		<-c
+		log.Info("second signal, killing process")
+		os.Exit(1)
+	}()
+	return ctx
 }
 
 func configHasAPI(discovery discovery.DiscoveryInterface, gv metav1.GroupVersion, kind ...string) bool {
@@ -835,6 +879,7 @@ type Config struct {
 	ReloadInterval           time.Duration
 	ReloadStrategy           string
 	ResyncPeriod             *time.Duration
+	RootContext              context.Context
 	Scheme                   *runtime.Scheme
 	ShutdownTimeout          *time.Duration
 	SortEndpointsBy          string
@@ -848,7 +893,6 @@ type Config struct {
 	ValidateConfig           bool
 	VerifyHostname           bool
 	VersionInfo              VersionInfo
-	WaitBeforeShutdown       int
 	WaitBeforeUpdate         time.Duration
 	WatchIngressWithoutClass bool
 	WatchNamespace           string
