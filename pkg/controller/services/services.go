@@ -259,7 +259,7 @@ func (s *Services) ReconcileIngress(changed *convtypes.ChangedObjects) {
 }
 
 func (s *Services) acmeCheck(source string) (count int, err error) {
-	if !s.svcleader.isLeader {
+	if !s.svcleader.getIsLeader() {
 		err = fmt.Errorf("cannot check acme certificates, this controller is not the leader")
 		s.log.Error(err, "error checking acme certificates")
 		return 0, err
@@ -267,13 +267,12 @@ func (s *Services) acmeCheck(source string) (count int, err error) {
 	s.modelMutex.Lock()
 	defer s.modelMutex.Unlock()
 	count, err = s.instance.AcmeCheck(source)
-	if count > 0 {
+	if err != nil {
+		s.log.Error(err, "failed checking acme certificates", "source", source)
+	} else if count > 0 {
 		s.log.Info("checking acme certificates", "source", source, "count", count)
 	} else {
 		s.log.Info("acme certificate list is empty", "source", source)
-	}
-	if err != nil {
-		s.log.Error(err, "failed checking acme certificates", "source", source)
 	}
 	return count, err
 }

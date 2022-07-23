@@ -370,7 +370,11 @@ define if ingress without class should be tracked.`)
 
 	var kubeConfig *rest.Config
 	if *apiserverHost == "" {
-		kubeConfig = ctrl.GetConfigOrDie()
+		var err error
+		kubeConfig, err = ctrl.GetConfig()
+		if err != nil {
+			return nil, err
+		}
 	} else {
 		kubeConfigFile := kubeconfig.Value.String()
 		var err error
@@ -397,10 +401,10 @@ define if ingress without class should be tracked.`)
 	clientGateway := gwapigatewayversioned.NewForConfigOrDie(kubeConfig)
 
 	configLog.Info("version info",
-		"controller_publicname", versionInfo.Name,
-		"controller_release", versionInfo.Release,
-		"controller_build", versionInfo.Build,
-		"controller_repo", versionInfo.Repository,
+		"controller-publicname", versionInfo.Name,
+		"controller-release", versionInfo.Release,
+		"controller-build", versionInfo.Build,
+		"controller-repo", versionInfo.Repository,
 	)
 
 	if *acmeElectionID != "" {
@@ -430,7 +434,7 @@ define if ingress without class should be tracked.`)
 	if *controllerClass != "" {
 		controllerName += "/" + strings.TrimLeft(*controllerClass, "/")
 	}
-	configLog.Info("watching for ingress resources with IngressClass", "controller_name", controllerName)
+	configLog.Info("watching for ingress resources with IngressClass", "controller-name", controllerName)
 
 	if *watchIngressWithoutClass {
 		configLog.Info("watching for ingress resources without any class reference - --watch-ingress-without-class is true")
@@ -498,7 +502,7 @@ define if ingress without class should be tracked.`)
 		masterWorkerCfg = true
 	}
 	if *masterSocket != "" {
-		configLog.Info("running external haproxy", "master unix socket", *masterSocket)
+		configLog.Info("running external haproxy", "master-unix-socket", *masterSocket)
 	} else if masterWorkerCfg {
 		configLog.Info("running embedded haproxy", "mode", "master-worker")
 	} else {
@@ -521,7 +525,7 @@ define if ingress without class should be tracked.`)
 		if err != nil {
 			return nil, fmt.Errorf("error reading global ConfigMap '%s': %w", *configMap, err)
 		}
-		configLog.Info("watching for global config options - --configmap was defined", "ConfigMap", *configMap)
+		configLog.Info("watching for global config options - --configmap was defined", "configmap", *configMap)
 	}
 
 	if *defaultSvc != "" {
@@ -536,7 +540,7 @@ define if ingress without class should be tracked.`)
 			}
 			return nil, fmt.Errorf("no service with name '%s' found: %w", *defaultSvc, err)
 		}
-		configLog.Info("using default backend", "Service", *defaultSvc)
+		configLog.Info("using default backend", "service", *defaultSvc)
 	}
 
 	if *publishSvc != "" {
@@ -552,9 +556,9 @@ define if ingress without class should be tracked.`)
 			if len(svc.Spec.ExternalIPs) == 0 {
 				return nil, fmt.Errorf("service '%s' does not (yet) have ingress points", *publishSvc)
 			}
-			configLog.Info("service validated as assigned with externalIP", "Service", *publishSvc)
+			configLog.Info("service validated as assigned with externalIP", "service", *publishSvc)
 		} else {
-			configLog.Info("service validated as source of Ingress status", "Service", *publishSvc)
+			configLog.Info("service validated as source of Ingress status", "service", *publishSvc)
 		}
 	}
 

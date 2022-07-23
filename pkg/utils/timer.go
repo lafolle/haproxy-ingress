@@ -83,12 +83,14 @@ func (t *Timer) AsValues(totalLabel string) []interface{} {
 	out := make([]interface{}, 0, 2*(len(t.Ticks)+1))
 	var total time.Duration
 	for _, tick := range t.Ticks {
-		out = append(out, tick.Event+"_ms")
+		// AsValues() is used by structured logging, so changing
+		// underscore `_` by dash `-` which is our key naming pattern.
+		out = append(out, strings.ReplaceAll(tick.Event, "_", "-")+"-ms")
 		out = append(out, float32(tick.Duration.Seconds()*1000))
 		total = total + tick.Duration
 	}
 	if totalLabel != "" {
-		out = append(out, totalLabel+"_ms")
+		out = append(out, strings.ReplaceAll(totalLabel, "_", "-")+"-ms")
 		out = append(out, float32(total.Seconds()*1000))
 	}
 	return out

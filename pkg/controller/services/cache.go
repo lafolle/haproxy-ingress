@@ -139,9 +139,9 @@ func (c *c) IsValidIngress(ing *networking.Ingress) bool {
 		if ingClass, err := c.GetIngressClass(*className); ingClass != nil {
 			fromClass = c.IsValidIngressClass(ingClass)
 		} else if err != nil {
-			c.log.Error(err, "error reading IngressClass", "IngressClass", *className)
+			c.log.Error(err, "error reading IngressClass", "ingressclass", *className)
 		} else {
-			c.log.Info("IngressClass not found", "IngressClass", *className)
+			c.log.Info("IngressClass not found", "ingressclass", *className)
 		}
 	}
 
@@ -151,13 +151,13 @@ func (c *c) IsValidIngress(ing *networking.Ingress) bool {
 	if hasAnn {
 		if hasClass && fromAnn != fromClass {
 			if c.config.IngressClassPrecedence {
-				c.log.Error(nil, "ingress %s/%s has conflicting ingress class configuration, "+
-					"using ingress class reference because of --ingress-class-precedence enabled (%t)",
-					ing.Namespace, ing.Name, fromClass)
+				c.log.Error(nil, "ingress has conflicting ingress class configuration, "+
+					"using ingress class reference because of --ingress-class-precedence enabled",
+					"ingress", ing.Namespace+"/"+ing.Name, "use-ingress", fromClass)
 				return fromClass
 			}
-			c.log.Error(nil, "ingress %s/%s has conflicting ingress class configuration, using annotation reference (%t)",
-				ing.Namespace, ing.Name, fromAnn)
+			c.log.Error(nil, "ingress has conflicting ingress class configuration, using annotation reference",
+				"ingress", ing.Namespace+"/"+ing.Name, "use-ingress", fromAnn)
 		}
 		return fromAnn
 	}
