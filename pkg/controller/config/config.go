@@ -236,11 +236,6 @@ Ingress resources that this controller is tracking.`)
 	electionID := flag.String("election-id", "fc5ae9f3.haproxy-ingress.github.io",
 		`Election id to be used for status update and certificate sign.`)
 
-	forceIsolation := flag.Bool("force-namespace-isolation", false,
-		`Force namespace isolation. This flag is required to avoid the reference of
-secrets, configmaps or the default backend service located in a different
-namespace than the specified in the flag --watch-namespace.`)
-
 	waitBeforeShutdown := flag.Int("wait-before-shutdown", 0,
 		`Define time controller waits until it shuts down when SIGTERM signal was
 received`)
@@ -324,6 +319,12 @@ Actually node listing isn't needed and it is always disabled`)
 		`DEPRECATED: used to define if HAProxy Ingress should disable pod watch and in
 memory list. This configuration is now ignored, the controller-runtime takes
 care of it.`)
+
+	forceIsolation := flag.Bool("force-namespace-isolation", false,
+		`DEPRECATED: this flag used to enforce that one namespace cannot read secrets
+and services from other namespaces, actually implemented by
+allow-cross-namespace command line option and cross-namespace configuration
+keys.`)
 
 	ignoreIngressWithoutClass := flag.Bool("ignore-ingress-without-class", false,
 		`DEPRECATED: Use --watch-ingress-without-class command-line option instead to
@@ -417,6 +418,9 @@ define if ingress without class should be tracked.`)
 	}
 	if *disablePodList {
 		configLog.Info("DEPRECATED: --disable-pod-list is ignored, controller-runtime automatically configures this option.")
+	}
+	if *forceIsolation {
+		configLog.Info("DEPRECATED: --force-namespace-isolation is ignored, use allow-cross-namespace command-line options or cross-namespace configuration keys instead.")
 	}
 
 	if *ingressClass != "" {
@@ -583,8 +587,8 @@ define if ingress without class should be tracked.`)
 		return nil, fmt.Errorf("resync period (%vs) is too low", resyncPeriod.Seconds())
 	}
 
-	if *forceIsolation && *allowCrossNamespace {
-		return nil, fmt.Errorf("Cannot use --allow-cross-namespace if --force-namespace-isolation is true")
+	if *watchNamespace != v1.NamespaceAll && *allowCrossNamespace {
+		return nil, fmt.Errorf("Cannot use --watch-namespace if --force-namespace-isolation is true")
 	}
 
 	var annPrefixList []string
