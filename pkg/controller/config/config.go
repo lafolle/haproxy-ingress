@@ -152,8 +152,7 @@ will be created in the same namespace of the controller pod`)
 	acmeTrackTLSAnn := flag.Bool("acme-track-tls-annotation", false,
 		`Enable tracking of ingress objects annotated with 'kubernetes.io/tls-acme'`)
 
-	bucketsResponseTime := []float64{.0005, .001, .002, .005, .01}
-	flag.Var(newFloat64SliceVar(&bucketsResponseTime), "buckets-response-time",
+	bucketsResponseTime := flagFloat64("buckets-response-time", []float64{.0005, .001, .002, .005, .01},
 		`Configures the buckets of the histogram used to compute the response time of
 the haproxy's admin socket. The response time unit is in seconds.`)
 
@@ -665,7 +664,7 @@ define if ingress without class should be tracked.`)
 		AllowCrossNamespace:      *allowCrossNamespace,
 		AnnPrefix:                annPrefixList,
 		BackendShards:            *backendShards,
-		BucketsResponseTime:      bucketsResponseTime,
+		BucketsResponseTime:      *bucketsResponseTime,
 		ConfigMapName:            *configMap,
 		ControllerName:           controllerName,
 		DefaultDirCACerts:        defaultDirCACerts,
@@ -744,8 +743,11 @@ func configHasAPI(discovery discovery.DiscoveryInterface, gv metav1.GroupVersion
 
 type float64SliceValue []float64
 
-func newFloat64SliceVar(ptr *[]float64) *float64SliceValue {
-	return (*float64SliceValue)(ptr)
+func flagFloat64(name string, value []float64, usage string) *float64SliceValue {
+	p := new(float64SliceValue)
+	*p = value
+	flag.Var(p, name, usage)
+	return p
 }
 
 func (f *float64SliceValue) Get() interface{} {
