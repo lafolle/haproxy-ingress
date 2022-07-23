@@ -225,7 +225,7 @@ endpoint`)
 		`Name of the secret that contains a SSL certificate to be used as
 default for a HTTPS catch-all server`)
 
-	verifyHostname := flag.Bool("verify-hostname", true,
+	verifyHostname := flag.Bool("verify-hostname", false,
 		`Defines if the controller should verify if the provided certificate is valid,
 ie, it's SAN extension has the hostname.`)
 

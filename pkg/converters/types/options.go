@@ -43,6 +43,7 @@ type ConverterOptions struct {
 	HasGatewayA1     bool
 	HasGateway       bool
 	UpdateStatus     bool
+	VerifyHostname   bool
 }
 
 // DynamicConfig ...

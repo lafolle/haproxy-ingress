@@ -459,6 +459,7 @@ func (c *k8scache) GetTLSSecretPath(defaultNamespace, secretName string, track [
 		Filename:   sslCert.PemFileName,
 		SHA1Hash:   sslCert.PemSHA,
 		CommonName: sslCert.Certificate.Subject.CommonName,
+		DNSNames:   sslCert.Certificate.DNSNames,
 		NotAfter:   sslCert.Certificate.NotAfter,
 	}
 	return file, nil

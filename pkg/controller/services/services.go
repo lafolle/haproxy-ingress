@@ -159,6 +159,7 @@ func (s *Services) setup(ctx context.Context) error {
 		HasGatewayA1:     cfg.HasGatewayA1,
 		HasGateway:       cfg.HasGateway,
 		UpdateStatus:     cfg.UpdateStatus,
+		VerifyHostname:   cfg.VerifyHostname,
 	}
 	instance := haproxy.CreateInstance(s.legacylogger.new("haproxy"), instanceOptions)
 	if err := instance.ParseTemplates(); err != nil {

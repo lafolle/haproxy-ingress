@@ -192,7 +192,7 @@ value. Change to 0 (zero) to disable this metric.`)
 			`Name of the secret that contains a SSL certificate to be used as
 default for a HTTPS catch-all server`)
 
-		verifyHostname = flags.Bool("verify-hostname", true,
+		verifyHostname = flags.Bool("verify-hostname", false,
 			`Defines if the controller should verify if the provided certificate is valid,
 ie, it's SAN extension has the hostname.`)
 

@@ -125,7 +125,7 @@ type ingressClassConfig struct {
 
 func (c *converter) NeedFullSync() bool {
 	needFullSync := c.defaultCrtNeedFullSync() || c.globalConfigNeedFullSync()
-	if needFullSync && c.defaultCrt == c.options.FakeCrtFile {
+	if needFullSync && c.defaultCrt.SHA1Hash == c.options.FakeCrtFile.SHA1Hash {
 		c.logger.Info("using auto generated fake certificate")
 	}
 	return needFullSync
@@ -446,7 +446,7 @@ func (c *converter) syncIngressHTTP(source *annotations.Source, ing *networking.
 		// tls secret
 		for _, hostname := range tls.Hosts {
 			host := c.addHost(hostname, source, annHost)
-			tlsPath := c.addTLS(source, tls.SecretName)
+			tlsPath := c.addTLS(source, hostname, tls.SecretName)
 			if host.TLS.TLSHash == "" {
 				host.TLS.TLSFilename = tlsPath.Filename
 				host.TLS.TLSHash = tlsPath.SHA1Hash
@@ -548,7 +548,7 @@ func (c *converter) syncIngressTCP(source *annotations.Source, ing *networking.I
 			c.logger.Warn("skipping TLS of tcp service on %v: backend was not configured", source)
 			return
 		}
-		tlsPath := c.addTLS(source, secretName)
+		tlsPath := c.addTLS(source, "", secretName)
 		if tcpPort.TLS.TLSHash == "" {
 			tcpPort.TLS.TLSFilename = tlsPath.Filename
 			tcpPort.TLS.TLSHash = tlsPath.SHA1Hash
@@ -899,13 +899,30 @@ func (c *converter) syncBackendEndpointHashes(backend *hatypes.Backend) {
 	}
 }
 
-func (c *converter) addTLS(source *annotations.Source, secretName string) convtypes.CrtFile {
+func (c *converter) addTLS(source *annotations.Source, hostname, secretName string) convtypes.CrtFile {
 	if secretName != "" {
 		tlsFile, err := c.cache.GetTLSSecretPath(
 			source.Namespace,
 			secretName,
 			[]convtypes.TrackingRef{{Context: source.Type, UniqueName: source.FullName()}},
 		)
+		if c.options.VerifyHostname && err == nil && hostname != "" {
+			valid := func() bool {
+				if hostname == tlsFile.CommonName {
+					return true
+				}
+				for _, dns := range tlsFile.DNSNames {
+					if hostname == dns {
+						return true
+					}
+				}
+				return false
+			}()
+			if valid {
+				return tlsFile
+			}
+			err = fmt.Errorf("certificate on secret '%s/%s' is not valid for hostname '%s'", source.Namespace, secretName, hostname)
+		}
 		if err == nil {
 			return tlsFile
 		}

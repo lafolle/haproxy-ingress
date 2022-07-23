@@ -470,6 +470,7 @@ func (c *c) GetTLSSecretPath(defaultNamespace, secretName string, track []convty
 		Filename:   sslCert.PemFileName,
 		SHA1Hash:   sslCert.PemSHA,
 		CommonName: sslCert.Certificate.Subject.CommonName,
+		DNSNames:   sslCert.Certificate.DNSNames,
 		NotAfter:   sslCert.Certificate.NotAfter,
 	}
 	return file, nil
